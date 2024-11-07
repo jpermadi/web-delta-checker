@@ -5,6 +5,7 @@ import difflib
 import os
 import boto3
 import os
+from notifier import notify
 
 # Configuration
 URL = 'https://vhs.frankfurt.de/de/service/termine-zum-einburgerungstest'  # The URL you want to monitor
@@ -68,14 +69,7 @@ def read_content(file_path):
         return None
     with open(file_path, 'r', encoding='utf-8') as file:
         return file.read()
-
-# Function to show notification
-# def show_notification(title, message):
-#     notification.notify(
-#         title=title,
-#         message=message,
-#         timeout=10
-#     )
+    
 
 def normalize_lines(content):
     # strip
@@ -95,7 +89,16 @@ def monitor_website():
         current_content = fetch_content(URL, CHECK_ELEMENT_ID)
         
         if current_content is None:
-            print("VHS Frankfurt Monitor - Error: Could not find the specified element on the page.")
+            output_msg = (
+                f"Dear user, \n\n"
+                f"we could not find the specified element on the web page. There might be issues on the target page or the URL might have been changed. \n"
+                f"Please check on website URL: {URL}\n\n"
+                f"Best regards, \n"
+                f"Jordy"    
+            )
+
+            notify.publish_sns_message(message=output_msg, subject=sns_subject)
+            print(output_msg)
             return
 
         # read last_content from S3 Bucket
@@ -108,8 +111,9 @@ def monitor_website():
             try:
                 current_content = normalize_lines(current_content)
                 write_file_to_s3(bucket_name, write_key, current_content)
-                print(f"Initial content saved for future comparison. File stored in {bucket_name}/{write_key}.")
-                return
+                output_msg = f"Initial content saved for future comparison. File stored in {bucket_name}/{write_key}."
+                print(output_msg)
+                
             except Exception as e:
                 return {
                     'statusCode': 500,
@@ -128,18 +132,34 @@ def monitor_website():
                 fromfile='Previous',
                 tofile='Current'
             )
-
+            output_msg = (
+                f"Dear Boss, \n\n"
+                f"the registration for Einbürgerungstest at VHS Frankfurt is now open. Register now fast! \n"
+                f"Website URL: {URL}\n\n"
+                f"Best regards, \n"
+                f"Jordy"    
+            )
+            
             changes = '\n'.join(diff)
-
-            print("VHS Frankfurt Monitor - Content change detected!")
+            print(output_msg)
             print(changes)
             print('----------------------------------------')
             print(f"Website URL: {URL}")
 
+            notify.publish_sns_message(message=output_msg, subject=sns_subject)
+            return {
+                "message" : output_msg,
+                "website URL" : URL
+            }
             # Update saved content
             # save_content(current_content, FILE_PATH)
         else:
-            print("VHS Frankfurt Monitor - No changes detected.")
+            output_msg = "VHS Frankfurt Monitor - No changes detected."
+            print(output_msg)
+            return {
+                "message" : output_msg,
+                "website URL" : URL
+            }
             # show_notification("VHS Frankfurt Monitor", "No changes in Website Content.")
 
     except Exception as e:
@@ -147,17 +167,17 @@ def monitor_website():
 
 # Initialize S3 client
 s3_client = boto3.client('s3')
+sns_client = boto3.client('sns')
+
 
 # Constant value assignment
 bucket_name = 'web-delta-checker-bucket'
 read_key = 'last_content/last_content.txt'
 write_key = 'last_content/last_content.txt'
+sns_subject = 'VHS Frankfurt Notification'
 
 
 def lambda_handler(event, context):
-    # TODO implement
-    monitor_website()
-    return {
-        'statusCode': 200,
-        'body': json.dumps('Hello from Lambda!')
-    }
+    
+    return monitor_website()
+
